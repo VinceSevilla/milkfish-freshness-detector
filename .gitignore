@@ -66,7 +66,6 @@ poetry.lock
 # Data and results
 /data/
 /evaluation_results/
-/results/
 
 # Model files
 *.h5
