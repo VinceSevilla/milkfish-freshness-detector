@@ -1,18 +1,5 @@
 from fastapi import UploadFile, File
 import shutil
-# ...existing code...
-
-# TEMPORARY: Admin endpoint to upload .h5 model files
-@app.post("/admin/upload-model/")
-async def upload_model(file: UploadFile = File(...)):
-    # Only allow .h5 files
-    if not file.filename.endswith(".h5"):
-        return {"error": "Only .h5 files are allowed."}
-    # Save to backend/results/
-    save_path = Path("results") / file.filename
-    with open(save_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    return {"status": "success", "filename": file.filename}
 """
 FastAPI Application for Fish Freshness Detection
 Handles image upload and real-time predictions
@@ -47,6 +34,7 @@ class CameraRequest(BaseModel):
     base64_image: str
 
 # Add CORS middleware
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -57,6 +45,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# TEMPORARY: Admin endpoint to upload .h5 model files
+@app.post("/admin/upload-model/")
+async def upload_model(file: UploadFile = File(...)):
+    # Only allow .h5 files
+    if not file.filename.endswith(".h5"):
+        return {"error": "Only .h5 files are allowed."}
+    # Save to backend/results/
+    save_path = Path("results") / file.filename
+    with open(save_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    return {"status": "success", "filename": file.filename}
 
 
 # Initialize models and detectors
