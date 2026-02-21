@@ -67,12 +67,6 @@ poetry.lock
 /data/
 /evaluation_results/
 
-# Model files
-*.h5
-*.pth
-*.pt
-*.ckpt
-
 # Node modules
 /frontend/node_modules/
 
