@@ -38,8 +38,7 @@ class CameraRequest(BaseModel):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://milkfish-freshness-detector.vercel.app",
-        "http://localhost:5173"
+        "https://milkfish-freshness-detector.vercel.app"
     ],
     allow_credentials=True,
     allow_methods=["*"],
