@@ -77,6 +77,9 @@ poetry.lock
 # Node modules
 /frontend/node_modules/
 
+# Environment files
+/frontend/.env
+
 # Build output
 /frontend/dist/
 
