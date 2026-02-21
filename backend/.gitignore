@@ -1,3 +1,5 @@
+# Ignore model files
+results/*.h5
 __pycache__/
 *.py[cod]
 *$py.class
