@@ -14,9 +14,11 @@ import io
 from PIL import Image
 import base64
 
+
 from app.detection.eye_detector import EyeDetector
 from app.detection.gills_detector import GillsDetector
 from app.models_service.model_loader import ModelLoader
+from app.config import MODELS_PATH
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -38,9 +40,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # Initialize models and detectors
-MODELS_DIR = Path(__file__).parent.parent.parent / "results"
-print(f"[INIT] __file__ = {__file__}")
+MODELS_DIR = Path(MODELS_PATH)
+print(f"[INIT] MODELS_PATH = {MODELS_PATH}")
 print(f"[INIT] MODELS_DIR = {MODELS_DIR}")
 print(f"[INIT] MODELS_DIR.exists() = {MODELS_DIR.exists()}")
 if MODELS_DIR.exists():

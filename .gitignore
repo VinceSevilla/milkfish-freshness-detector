@@ -1,5 +1,9 @@
 # Exclude old models
 results/old_resnet_only/
+# Allow backend/results/ and its contents
+!backend/results/
+!backend/results/**
+!backend/results/**/*.h5
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
