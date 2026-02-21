@@ -67,7 +67,7 @@ if MODELS_DIR.exists():
     print(f"[INIT] Files in MODELS_DIR: {list(MODELS_DIR.glob('*.h5'))}")
 eye_detector = EyeDetector()
 gills_detector = GillsDetector()
-# model_loader = ModelLoader(str(MODELS_DIR))
+model_loader = ModelLoader(str(MODELS_DIR))
 
 
 def detect_and_extract_regions(image: np.ndarray) -> dict:
