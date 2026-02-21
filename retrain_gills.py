@@ -84,35 +84,31 @@ class GillsModelRetrainer:
         return bgr_corrected
     
     def load_images(self):
-        """Load gills images with white balance correction"""
-        print("\n[LOADER] Loading gills images with white balance correction...")
-        
-        data_dir = Path('data/raw/gills')
+        """Load gills images from both raw and processed folders with white balance correction"""
+        print("\n[LOADER] Loading gills images from raw and processed folders with white balance correction...")
         X_images = []
         y_labels = []
-        
         for class_idx, class_name in enumerate(self.FRESHNESS_CLASSES):
-            class_path = data_dir / class_name
-            images = list(class_path.glob('*.jpg')) + list(class_path.glob('*.png'))
-            print(f"  {class_name}: {len(images)} images")
-            
+            # Load from raw
+            raw_class_path = Path('data/raw/gills') / class_name
+            raw_images = list(raw_class_path.glob('*.jpg')) + list(raw_class_path.glob('*.png'))
+            # Load from processed
+            processed_class_path = Path('data/processed/gills') / class_name
+            processed_images = list(processed_class_path.glob('*.jpg')) + list(processed_class_path.glob('*.png'))
+            images = raw_images + processed_images
+            print(f"  {class_name}: {len(images)} images (raw: {len(raw_images)}, processed: {len(processed_images)})")
             for img_path in tqdm(images, desc=f"  Loading {class_name}", leave=False):
                 img = cv2.imread(str(img_path))
                 if img is None:
                     continue
-                
                 # Apply white balance correction
                 img_corrected = self.apply_white_balance(img)
-                
                 # Resize
                 img_resized = cv2.resize(img_corrected, (224, 224))
-                
                 X_images.append(img_resized)
                 y_labels.append(class_idx)
-        
         X = np.array(X_images)
         y = np.array(y_labels)
-        
         print(f"✓ Loaded {len(X)} images (white-balance corrected)")
         return X, y
     

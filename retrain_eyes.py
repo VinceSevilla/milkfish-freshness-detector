@@ -79,15 +79,19 @@ class EyesModelRetrainer:
         return bgr_corrected
 
     def load_images(self):
-        """Load eyes images with white balance correction"""
-        print("\n[LOADER] Loading eyes images with white balance correction...")
-        data_dir = Path('data/raw/eyes')
+        """Load eyes images from both raw and processed folders with white balance correction"""
+        print("\n[LOADER] Loading eyes images from raw and processed folders with white balance correction...")
         X_images = []
         y_labels = []
         for class_idx, class_name in enumerate(self.FRESHNESS_CLASSES):
-            class_path = data_dir / class_name
-            images = list(class_path.glob('*.jpg')) + list(class_path.glob('*.png'))
-            print(f"  {class_name}: {len(images)} images")
+            # Load from raw
+            raw_class_path = Path('data/raw/eyes') / class_name
+            raw_images = list(raw_class_path.glob('*.jpg')) + list(raw_class_path.glob('*.png'))
+            # Load from processed
+            processed_class_path = Path('data/processed/eyes') / class_name
+            processed_images = list(processed_class_path.glob('*.jpg')) + list(processed_class_path.glob('*.png'))
+            images = raw_images + processed_images
+            print(f"  {class_name}: {len(images)} images (raw: {len(raw_images)}, processed: {len(processed_images)})")
             for img_path in tqdm(images, desc=f"  Loading {class_name}", leave=False):
                 img = cv2.imread(str(img_path))
                 if img is None:
