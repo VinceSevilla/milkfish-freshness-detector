@@ -1,0 +1,3 @@
+"""
+Models service package initialization
+"""

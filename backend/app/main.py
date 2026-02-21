@@ -1,0 +1,326 @@
+"""
+FastAPI Application for Fish Freshness Detection
+Handles image upload and real-time predictions
+"""
+
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+import cv2
+import numpy as np
+from pathlib import Path
+import io
+from PIL import Image
+import base64
+
+from app.detection.eye_detector import EyeDetector
+from app.detection.gills_detector import GillsDetector
+from app.models_service.model_loader import ModelLoader
+
+# Initialize FastAPI app
+app = FastAPI(
+    title="Fish Freshness Detection API",
+    description="Real-time fish freshness classification using eyes and gills",
+    version="1.0.0"
+)
+
+
+class CameraRequest(BaseModel):
+    base64_image: str
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize models and detectors
+MODELS_DIR = Path(__file__).parent.parent.parent / "results"
+print(f"[INIT] __file__ = {__file__}")
+print(f"[INIT] MODELS_DIR = {MODELS_DIR}")
+print(f"[INIT] MODELS_DIR.exists() = {MODELS_DIR.exists()}")
+if MODELS_DIR.exists():
+    print(f"[INIT] Files in MODELS_DIR: {list(MODELS_DIR.glob('*.h5'))}")
+eye_detector = EyeDetector()
+gills_detector = GillsDetector()
+model_loader = ModelLoader(str(MODELS_DIR))
+
+
+def detect_and_extract_regions(image: np.ndarray) -> dict:
+    """Detect and extract both eye and gill regions using separate detectors"""
+    print(f"[MAIN] Starting detection on image: {image.shape}")
+    
+    # Detect eyes
+    print("[MAIN] Calling eye detector...")
+    eye_result = eye_detector.detect_and_extract(image)
+    print(f"[MAIN] Eye detection result: {eye_result['eye_detected']}")
+    
+    # Detect gills
+    print("[MAIN] Calling gills detector...")
+    gill_result = gills_detector.detect_and_extract(image)
+    print(f"[MAIN] Gill detection result: {gill_result['gill_detected']}")
+    
+    # Combine results
+    return {
+        'eye': eye_result['eye'],
+        'gill': gill_result['gill'],
+        'eye_bbox': eye_result['eye_bbox'],
+        'gill_bbox': gill_result['gill_bbox'],
+        'full_image': image,
+        'eye_detected': eye_result['eye_detected'],
+        'gill_detected': gill_result['gill_detected']
+    }
+
+
+def convert_image_to_base64(image: np.ndarray) -> str:
+    """Convert numpy array to base64 string"""
+    _, buffer = cv2.imencode('.png', image)
+    return base64.b64encode(buffer).decode('utf-8')
+
+
+def convert_base64_to_image(base64_str: str) -> np.ndarray:
+    """Convert base64 string to numpy array"""
+    image_data = base64.b64decode(base64_str)
+    image = Image.open(io.BytesIO(image_data))
+    return cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "ok",
+        "eye_model_loaded": model_loader.eye_model is not None,
+        "gill_model_loaded": model_loader.gill_model is not None,
+        "eyes_gills_model_loaded": model_loader.eyes_gills_model is not None
+    }
+
+
+@app.post("/predict/upload")
+async def predict_from_upload(file: UploadFile = File(...)):
+    """
+    Predict freshness from uploaded image
+    Detects eyes and gills, returns predictions for both
+    """
+    try:
+        # Read image
+        contents = await file.read()
+        image = Image.open(io.BytesIO(contents))
+        image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+        
+        # Detect regions
+        regions = detect_and_extract_regions(image_cv)
+        
+        # Prepare predictions
+        predictions = {
+            "eye_detected": regions['eye_detected'],
+            "gill_detected": regions['gill_detected'],
+            "eye_prediction": None,
+            "gill_prediction": None,
+            "integrated_prediction": None,
+            "annotated_image": None,
+            "original_image_base64": convert_image_to_base64(image_cv)
+        }
+        
+        # Predict from eye if detected
+        print(f"[PREDICT] Eye detected: {regions['eye_detected']}, Eye ROI is None: {regions['eye'] is None}")
+        if regions['eye'] is not None:
+            print(f"[PREDICT] Eye ROI shape: {regions['eye'].shape}")
+        if regions['eye_detected'] and regions['eye'] is not None:
+            print(f"[PREDICT] Calling predict_eye...")
+            predictions['eye_prediction'] = model_loader.predict_eye(regions['eye'], include_glcm=True)
+            print(f"[PREDICT] Eye prediction result: {predictions['eye_prediction']}")
+        
+        # Predict from gill if detected
+        print(f"[PREDICT] Gill detected: {regions['gill_detected']}, Gill ROI is None: {regions['gill'] is None}")
+        if regions['gill'] is not None:
+            print(f"[PREDICT] Gill ROI shape: {regions['gill'].shape}")
+        if regions['gill_detected'] and regions['gill'] is not None:
+            print(f"[PREDICT] Calling predict_gill...")
+            predictions['gill_prediction'] = model_loader.predict_gill(regions['gill'], include_glcm=True)
+            print(f"[PREDICT] Gill prediction result: {predictions['gill_prediction']}")
+        
+        # Calculate overall prediction by averaging eye and gill predictions
+        if predictions['eye_prediction'] and predictions['gill_prediction']:
+            # Average the probability distributions
+            eye_probs = predictions['eye_prediction']['probabilities']
+            gill_probs = predictions['gill_prediction']['probabilities']
+            
+            avg_probs = {}
+            for class_name in eye_probs.keys():
+                avg_probs[class_name] = (eye_probs[class_name] + gill_probs[class_name]) / 2
+            
+            # Find class with highest average probability
+            overall_class = max(avg_probs, key=avg_probs.get)
+            overall_confidence = avg_probs[overall_class]
+            
+            predictions['integrated_prediction'] = {
+                'class': overall_class,
+                'confidence': overall_confidence,
+                'probabilities': avg_probs
+            }
+        else:
+            # If only one is available, use that one
+            predictions['integrated_prediction'] = predictions['eye_prediction'] or predictions['gill_prediction']
+        
+        # Create annotated image
+        annotated = image_cv.copy()
+        
+        if regions['eye_bbox']:
+            x, y, w, h = regions['eye_bbox']
+            cv2.rectangle(annotated, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            cv2.putText(annotated, "Eye", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        
+        if regions['gill_bbox']:
+            x, y, w, h = regions['gill_bbox']
+            cv2.rectangle(annotated, (x, y), (x + w, y + h), (255, 0, 0), 2)
+            cv2.putText(annotated, "Gill", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+        
+        predictions['annotated_image'] = convert_image_to_base64(annotated)
+        
+        return JSONResponse(predictions)
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/predict/camera")
+async def predict_from_camera(payload: CameraRequest):
+    """
+    Predict freshness from camera frame (base64 encoded)
+    """
+    try:
+        # Decode image
+        image_cv = convert_base64_to_image(payload.base64_image)
+        
+        # Detect regions
+        regions = detect_and_extract_regions(image_cv)
+        
+        # Prepare predictions
+        predictions = {
+            "eye_detected": regions['eye_detected'],
+            "gill_detected": regions['gill_detected'],
+            "eye_prediction": None,
+            "gill_prediction": None,
+            "integrated_prediction": None,
+            "annotated_image": None,
+        }
+        
+        # Predict from eye if detected
+        print(f"[PREDICT-CAM] Eye detected: {regions['eye_detected']}, Eye ROI is None: {regions['eye'] is None}")
+        if regions['eye'] is not None:
+            print(f"[PREDICT-CAM] Eye ROI shape: {regions['eye'].shape}")
+        if regions['eye_detected'] and regions['eye'] is not None:
+            print(f"[PREDICT-CAM] Calling predict_eye...")
+            predictions['eye_prediction'] = model_loader.predict_eye(regions['eye'], include_glcm=True)
+            print(f"[PREDICT-CAM] Eye prediction result: {predictions['eye_prediction']}")
+        
+        # Predict from gill if detected
+        print(f"[PREDICT-CAM] Gill detected: {regions['gill_detected']}, Gill ROI is None: {regions['gill'] is None}")
+        if regions['gill'] is not None:
+            print(f"[PREDICT-CAM] Gill ROI shape: {regions['gill'].shape}")
+        if regions['gill_detected'] and regions['gill'] is not None:
+            print(f"[PREDICT-CAM] Calling predict_gill...")
+            predictions['gill_prediction'] = model_loader.predict_gill(regions['gill'], include_glcm=True)
+            print(f"[PREDICT-CAM] Gill prediction result: {predictions['gill_prediction']}")
+        
+        # Calculate overall prediction by averaging eye and gill predictions
+        if predictions['eye_prediction'] and predictions['gill_prediction']:
+            # Average the probability distributions
+            eye_probs = predictions['eye_prediction']['probabilities']
+            gill_probs = predictions['gill_prediction']['probabilities']
+            
+            avg_probs = {}
+            for class_name in eye_probs.keys():
+                avg_probs[class_name] = (eye_probs[class_name] + gill_probs[class_name]) / 2
+            
+            # Find class with highest average probability
+            overall_class = max(avg_probs, key=avg_probs.get)
+            overall_confidence = avg_probs[overall_class]
+            
+            predictions['integrated_prediction'] = {
+                'class': overall_class,
+                'confidence': overall_confidence,
+                'probabilities': avg_probs
+            }
+        else:
+            # If only one is available, use that one
+            predictions['integrated_prediction'] = predictions['eye_prediction'] or predictions['gill_prediction']
+        
+        # Create annotated image
+        annotated = image_cv.copy()
+        
+        if regions['eye_bbox']:
+            x, y, w, h = regions['eye_bbox']
+            cv2.rectangle(annotated, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            cv2.putText(annotated, "Eye", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        
+        if regions['gill_bbox']:
+            x, y, w, h = regions['gill_bbox']
+            cv2.rectangle(annotated, (x, y), (x + w, y + h), (255, 0, 0), 2)
+            cv2.putText(annotated, "Gill", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+        
+        predictions['annotated_image'] = convert_image_to_base64(annotated)
+        
+        return JSONResponse(predictions)
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/detect")
+async def detect_regions(file: UploadFile = File(...)):
+    """
+    Detect eyes and gills regions in uploaded image
+    Returns bounding boxes and extracted ROIs
+    """
+    try:
+        contents = await file.read()
+        image = Image.open(io.BytesIO(contents))
+        image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+        
+        regions = detect_and_extract_regions(image_cv)
+        
+        result = {
+            "eye_detected": regions['eye_detected'],
+            "gill_detected": regions['gill_detected'],
+            "eye_bbox": regions['eye_bbox'],
+            "gill_bbox": regions['gill_bbox'],
+            "original_image": convert_image_to_base64(image_cv),
+            "annotated_image": None,
+            "eye_roi": None,
+            "gill_roi": None
+        }
+        
+        # Create annotated image
+        annotated = image_cv.copy()
+        
+        if regions['eye_bbox']:
+            x, y, w, h = regions['eye_bbox']
+            cv2.rectangle(annotated, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            cv2.putText(annotated, "Eye", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            if regions['eye'] is not None:
+                result['eye_roi'] = convert_image_to_base64(regions['eye'])
+        
+        if regions['gill_bbox']:
+            x, y, w, h = regions['gill_bbox']
+            cv2.rectangle(annotated, (x, y), (x + w, y + h), (255, 0, 0), 2)
+            cv2.putText(annotated, "Gill", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+            if regions['gill'] is not None:
+                result['gill_roi'] = convert_image_to_base64(regions['gill'])
+        
+        result['annotated_image'] = convert_image_to_base64(annotated)
+        
+        return JSONResponse(result)
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
