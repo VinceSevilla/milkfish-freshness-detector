@@ -60,15 +60,15 @@ async def upload_model(file: UploadFile = File(...)):
 
 
 # Initialize models and detectors
-# MODELS_DIR = Path(MODELS_PATH)
-# print(f"[INIT] MODELS_PATH = {MODELS_PATH}")
-# print(f"[INIT] MODELS_DIR = {MODELS_DIR}")
-# print(f"[INIT] MODELS_DIR.exists() = {MODELS_DIR.exists()}")
-# if MODELS_DIR.exists():
-#     print(f"[INIT] Files in MODELS_DIR: {list(MODELS_DIR.glob('*.h5'))}")
-# eye_detector = EyeDetector()
-# gills_detector = GillsDetector()
-# model_loader = ModelLoader(str(MODELS_DIR))
+MODELS_DIR = Path(MODELS_PATH)
+print(f"[INIT] MODELS_PATH = {MODELS_PATH}")
+print(f"[INIT] MODELS_DIR = {MODELS_DIR}")
+print(f"[INIT] MODELS_DIR.exists() = {MODELS_DIR.exists()}")
+if MODELS_DIR.exists():
+    print(f"[INIT] Files in MODELS_DIR: {list(MODELS_DIR.glob('*.h5'))}")
+eye_detector = EyeDetector()
+gills_detector = GillsDetector()
+model_loader = ModelLoader(str(MODELS_DIR))
 
 
 def detect_and_extract_regions(image: np.ndarray) -> dict:
