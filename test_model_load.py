@@ -1,9 +1,13 @@
 from tensorflow.keras.models import load_model
 
-# Try loading your eyes model
-model = load_model("backend/results/best_model_eyes.h5")
-print("Eyes model loaded successfully!")
+try:
+    eye_model = load_model("backend/results/best_model_eyes.h5", compile=False)
+    print("Eye model loaded successfully!")
+except Exception as e:
+    print("Failed to load eye model:", e)
 
-# Try loading your gills model
-model = load_model("backend/results/best_model_gills.h5")
-print("Gills model loaded successfully!")
+try:
+    gill_model = load_model("backend/results/best_model_gills.h5", compile=False)
+    print("Gill model loaded successfully!")
+except Exception as e:
+    print("Failed to load gill model:", e)
