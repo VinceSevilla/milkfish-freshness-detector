@@ -7,6 +7,7 @@ Handles image upload and real-time predictions
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+import os
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import cv2
@@ -34,14 +35,19 @@ class CameraRequest(BaseModel):
     base64_image: str
 
 # Add CORS middleware
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+# Add CORS middleware using environment variable
+origins = os.getenv("CORS_ORIGINS", "").split(",")
+origins = [o.strip() for o in origins if o.strip()]
+if not origins:
+    # fallback to default for local dev
+    origins = [
         "https://milkfish-freshness-detector.vercel.app",
         "http://localhost:3000",
         "http://localhost:5173"
-    ],
+    ]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
