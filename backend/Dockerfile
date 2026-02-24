@@ -19,6 +19,8 @@ RUN pip install --upgrade pip setuptools wheel && \
 
 # Copy app code
 COPY . .
+# Ensure model files are copied (even if .dockerignore is present)
+COPY results/*.h5 /app/results/
 
 # Expose port
 EXPOSE 8001
