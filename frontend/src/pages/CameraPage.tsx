@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Modal } from '@/components/ui/modal'
 import { PredictionDisplay } from '@/components/PredictionDisplay'
@@ -131,6 +132,24 @@ export function CameraPage() {
                     playsInline
                     className="w-full h-full object-cover"
                   />
+                  {/* Switch Camera Icon Button */}
+                  {isStreaming && (
+                    <button
+                      onClick={toggleCamera}
+                      className="absolute bottom-3 right-3 bg-white/80 hover:bg-white rounded-full p-2 shadow-lg z-20"
+                      aria-label="Switch Camera"
+                      type="button"
+                    >
+                      {/* Inline SVG for camera switch icon */}
+                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-700">
+                        <path d="M7 7h.01" />
+                        <path d="M21 13v-2a4 4 0 0 0-4-4H7.5l1.5-2" />
+                        <path d="M3 11v2a4 4 0 0 0 4 4h9.5l-1.5 2" />
+                        <polyline points="7 7 3 11 7 15" />
+                        <polyline points="17 7 21 11 17 15" />
+                      </svg>
+                    </button>
+                  )}
                 </div>
 
                 {cameraError && (
@@ -139,15 +158,7 @@ export function CameraPage() {
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <Button
-                    onClick={toggleCamera}
-                    variant="secondary"
-                    className="w-full"
-                    disabled={!isStreaming}
-                  >
-                    Switch Camera ({facingMode === "user" ? "Front" : "Back"})
-                  </Button>
+                <div className="grid grid-cols-2 gap-3">
                   <Button
                     onClick={isStreaming ? stopCamera : startCamera}
                     variant={isStreaming ? 'outline' : 'default'}
