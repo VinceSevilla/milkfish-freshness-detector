@@ -35,19 +35,10 @@ class CameraRequest(BaseModel):
     base64_image: str
 
 # Add CORS middleware
-# Add CORS middleware using environment variable
-origins = os.getenv("CORS_ORIGINS", "").split(",")
-origins = [o.strip() for o in origins if o.strip()]
-if not origins:
-    # fallback to default for local dev
-    origins = [
-        "https://milkfish-freshness-detector.vercel.app",
-        "http://localhost:3000",
-        "http://localhost:5173"
-    ]
+# Allow all origins for debugging (not for production!)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
