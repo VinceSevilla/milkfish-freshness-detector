@@ -15,6 +15,7 @@ export function CameraPage() {
   const [annotatedImage, setAnnotatedImage] = useState<string | null>(null)
   const [cameraError, setCameraError] = useState<string | null>(null)
   const [showResultsModal, setShowResultsModal] = useState(false)
+  const [facingMode, setFacingMode] = useState<"user" | "environment">("environment")
 
   useEffect(() => {
     return () => {
@@ -26,9 +27,8 @@ export function CameraPage() {
     try {
       setCameraError(null)
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: { facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
       })
-
       if (videoRef.current) {
         videoRef.current.srcObject = stream
         setIsStreaming(true)
@@ -36,6 +36,14 @@ export function CameraPage() {
     } catch (error) {
       setCameraError('Unable to access camera. Please check permissions.')
       console.error('Error accessing camera:', error)
+    }
+  }
+
+  const toggleCamera = () => {
+    setFacingMode((prev) => (prev === "user" ? "environment" : "user"));
+    if (isStreaming) {
+      stopCamera();
+      setTimeout(() => startCamera(), 300);
     }
   }
 
@@ -131,7 +139,15 @@ export function CameraPage() {
                   </div>
                 )}
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <Button
+                    onClick={toggleCamera}
+                    variant="secondary"
+                    className="w-full"
+                    disabled={!isStreaming}
+                  >
+                    Switch Camera ({facingMode === "user" ? "Front" : "Back"})
+                  </Button>
                   <Button
                     onClick={isStreaming ? stopCamera : startCamera}
                     variant={isStreaming ? 'outline' : 'default'}
