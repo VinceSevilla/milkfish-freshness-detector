@@ -1,3 +1,5 @@
+print("VERY TOP OF FILE")
+
 """
 Train fish freshness detection models using ResNet50 + GLCM features
 Data: data/processed/{eyes,gills,eyes_and_gills}/{fresh,less_fresh,starting_to_rot,rotten}/
@@ -17,6 +19,8 @@ from sklearn.utils.class_weight import compute_class_weight
 import cv2
 from datetime import datetime
 import imgaug.augmenters as iaa
+from tqdm import tqdm
+import warnings
 
 # Import GLCM extractor from backend
 sys.path.insert(0, str(Path(__file__).parent / 'backend'))
@@ -33,7 +37,6 @@ class FishFreshnessTrainer:
         self.data_dir = Path(data_dir)
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True)
-        
         # Load ResNet50 for feature extraction (2048 features)
         self.resnet_model = tf.keras.applications.ResNet50(
             weights='imagenet',
@@ -42,7 +45,6 @@ class FishFreshnessTrainer:
         )
         self.resnet_model.trainable = False  # Freeze weights
         print("✓ Loaded ResNet50 (frozen weights)")
-        
         # Load MobileNetV1 for feature extraction (1024 features)
         self.mobilenet_model = tf.keras.applications.MobileNet(
             weights='imagenet',
@@ -51,7 +53,6 @@ class FishFreshnessTrainer:
         )
         self.mobilenet_model.trainable = False  # Initially frozen
         print("✓ Loaded MobileNetV1 (initially frozen)")
-        
         # Data augmentation pipeline
         self.augmenter = iaa.Sequential([
             iaa.Fliplr(0.5),  # Horizontal flip 50%
@@ -64,6 +65,16 @@ class FishFreshnessTrainer:
             iaa.GaussianBlur(sigma=(0, 1.0))  # Slight blur
         ], random_order=True)
         print("✓ Data augmentation pipeline ready")
+
+    def apply_white_balance(self, img):
+        """Simple white balance using Gray World Assumption"""
+        result = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+        avg_a = np.average(result[:, :, 1])
+        avg_b = np.average(result[:, :, 2])
+        result[:, :, 1] = result[:, :, 1] - ((avg_a - 128) * (result[:, :, 0] / 255.0) * 1.1)
+        result[:, :, 2] = result[:, :, 2] - ((avg_b - 128) * (result[:, :, 0] / 255.0) * 1.1)
+        result = cv2.cvtColor(result, cv2.COLOR_LAB2BGR)
+        return result
     
     def load_images_and_extract_features(self, folder_type):
         """
@@ -95,58 +106,66 @@ class FishFreshnessTrainer:
             if not class_path.exists():
                 print(f"⚠ Class folder not found: {class_path}")
                 continue
-            
             image_files = list(class_path.glob('*.jpg')) + list(class_path.glob('*.png')) + list(class_path.glob('*.jpeg'))
             print(f"  {class_name}: {len(image_files)} images")
-            
-            for img_path in image_files:
+            for img_path in tqdm(image_files, desc=f"  {folder_type}-{class_name}"):
                 try:
                     # Load image
                     image = cv2.imread(str(img_path))
                     if image is None:
                         print(f"⚠ Failed to load: {img_path}")
                         continue
-                    
+                    # White balance correction for gills
+                    if folder_type == 'gills':
+                        image = self.apply_white_balance(image)
                     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                    
                     # Apply data augmentation (50% chance)
                     if np.random.random() > 0.5:
                         image = self.augmenter(image=image)
-                    
                     # Extract ResNet50 features (2048-dim)
                     processed_resnet = preprocess_input(image.astype(np.float32))
                     batch = np.expand_dims(processed_resnet, axis=0)
                     resnet_feat = self.resnet_model.predict(batch, verbose=0)
                     resnet_features_list.append(resnet_feat[0])
-                    
                     # Extract MobileNetV1 features (1024-dim)
-                    from tensorflow.keras.applications.mobilenet import preprocess_input as mobilenet_preprocess
                     processed_mobile = mobilenet_preprocess(image.astype(np.float32))
                     batch_mobile = np.expand_dims(processed_mobile, axis=0)
                     mobilenet_feat = self.mobilenet_model.predict(batch_mobile, verbose=0)
                     mobilenet_features_list.append(mobilenet_feat[0])
-                    
                     # Extract GLCM features
                     glcm_dict = GLCMExtractor.compute_glcm_summary(image)
                     glcm_feat = self._flatten_glcm_features(glcm_dict)
                     glcm_features_list.append(glcm_feat)
-                    
                     # Add label
                     labels_list.append(class_idx)
                     total_images += 1
-                    
                     if total_images % 50 == 0:
                         print(f"    Processed {total_images} images...")
-                
                 except Exception as e:
                     print(f"⚠ Error processing {img_path}: {e}")
                     continue
-        
+
         if not resnet_features_list:
             print(f"✗ No images loaded for {folder_type}")
             return None, None, None
-        
+
         # Concatenate ResNet50 (2048) + MobileNet (1024) = 3072 features
+        X_resnet = np.array(resnet_features_list)
+        X_mobilenet = np.array(mobilenet_features_list)
+        X_cnn = np.concatenate([X_resnet, X_mobilenet], axis=1)
+
+        X_glcm = np.array(glcm_features_list)
+        y = np.array(labels_list)
+
+        print(f"✓ Loaded {total_images} images")
+        print(f"  ResNet50 features: {X_resnet.shape}")
+        print(f"  MobileNetV1 features: {X_mobilenet.shape}")
+        print(f"  Combined CNN features: {X_cnn.shape}")
+        print(f"  GLCM features: {X_glcm.shape}")
+        print(f"  Labels: {y.shape}")
+        print(f"  Class distribution: {np.bincount(y)}")
+
+        return X_cnn, X_glcm, y
         X_resnet = np.array(resnet_features_list)
         X_mobilenet = np.array(mobilenet_features_list)
         X_cnn = np.concatenate([X_resnet, X_mobilenet], axis=1)
@@ -400,48 +419,92 @@ class FishFreshnessTrainer:
         return model, history, accuracy
     
     def train_all(self):
-        """Train all three models"""
+        """Train all three models and object detectors"""
         results = {}
-        
-        for folder_type in ['eyes', 'gills', 'eyes_and_gills']:
-            print(f"\n{'='*60}")
-            print(f"Training {folder_type.upper()} Model")
-            print(f"{'='*60}")
-            
-            # Load data
-            X_cnn, X_glcm, y = self.load_images_and_extract_features(folder_type)
-            
-            if X_cnn is None:
-                print(f"✗ Skipping {folder_type} - no data loaded")
-                continue
-            
-            # Train
+
+        # Train Eyes Model (commented out to only train gills)
+        # print(f"\n{'='*60}")
+        # print(f"Training EYES Model")
+        # print(f"{'='*60}")
+        # X_cnn, X_glcm, y = self.load_images_and_extract_features('eyes')
+        # if X_cnn is not None:
+        #     model, history, accuracy = self.train_model(
+        #         X_cnn, X_glcm, y,
+        #         model_name='eyes',
+        #         epochs=100,
+        #         batch_size=16
+        #     )
+        #     results['eyes'] = {'model': model, 'accuracy': accuracy, 'history': history}
+        # else:
+        #     print(f"✗ Skipping eyes - no data loaded")
+
+        # Train Gills Model (with white balance correction)
+        print(f"\n{'='*60}")
+        print(f"Training GILLS Model (with white balance)")
+        print(f"{'='*60}")
+        X_cnn, X_glcm, y = self.load_images_and_extract_features('gills')
+        if X_cnn is not None:
             model, history, accuracy = self.train_model(
                 X_cnn, X_glcm, y,
-                model_name=folder_type,
-                epochs=100,  # Total epochs (30 frozen + 70 fine-tune)
+                model_name='gills',
+                epochs=100,
                 batch_size=16
             )
-            
-            results[folder_type] = {
-                'model': model,
-                'accuracy': accuracy,
-                'history': history
-            }
-        
+            results['gills'] = {'model': model, 'accuracy': accuracy, 'history': history}
+        else:
+            print(f"✗ Skipping gills - no data loaded")
+
         print(f"\n{'='*60}")
         print(f"TRAINING COMPLETE")
         print(f"{'='*60}")
-        
         for folder_type, data in results.items():
             print(f"{folder_type}: Accuracy = {data['accuracy']*100:.2f}%")
-        
         print(f"\n✓ Models saved to {self.output_dir}")
 
+    def train_object_detector(self, part):
+        """
+        Train an object detection model for gills or eyes using TensorFlow Object Detection API.
+        This function assumes you have annotated your dataset with bounding boxes for each freshness class:
+        'fresh', 'less_fresh', 'starting_to_rot', 'rotten'.
+        
+        Steps:
+        1. Prepare your images and annotations (in Pascal VOC or COCO format) for each class.
+        2. Convert annotations to TFRecord format (TensorFlow OD API requirement).
+        3. Create a label map file (e.g., part_label_map.pbtxt) with all freshness classes.
+        4. Prepare a pipeline config file for your chosen model (e.g., SSD, Faster R-CNN).
+        5. Run this function to start training.
+        """
+        import os
+        import subprocess
 
-if __name__ == '__main__':
-    trainer = FishFreshnessTrainer(
-        data_dir='data/processed',
-        output_dir='results'
-    )
+        # Paths (update as needed)
+        pipeline_config_path = f"object_detection/configs/{part}_pipeline.config"
+        model_dir = f"object_detection/models/{part}_detector"
+        train_record = f"object_detection/data/{part}_train.record"
+        val_record = f"object_detection/data/{part}_val.record"
+        label_map = f"object_detection/data/{part}_label_map.pbtxt"
+
+        # Check required files
+        for path in [pipeline_config_path, train_record, val_record, label_map]:
+            if not os.path.exists(path):
+                print(f"Missing required file: {path}")
+                return
+
+        # Run TensorFlow Object Detection training
+        command = [
+            "python", "object_detection/model_main_tf2.py",
+            "--model_dir", model_dir,
+            "--pipeline_config_path", pipeline_config_path,
+            "--num_train_steps=10000",
+            "--sample_1_of_n_eval_examples=1",
+            "--alsologtostderr"
+        ]
+        print(f"Running: {' '.join(command)}")
+        subprocess.run(command)
+        print(f"Training for {part} object detector complete.")
+
+        # After training, export the model for inference as needed.
+if __name__ == "__main__":
+    print("[MAIN BLOCK] Starting Fish Freshness Training Script...")
+    trainer = FishFreshnessTrainer()
     trainer.train_all()
